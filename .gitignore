@@ -1,16 +1,27 @@
 # Python/Jupyter
 __pycache__/
+*.py[cod]
+*$py.class
 .ipynb_checkpoints/
 
-# Data (If your Excel files are huge, ignore them and keep backups elsewhere)
-# *.xlsx
-# *.csv
+# Virtual Environments 
+ra_env/
+venv/
+ENV/
 
-# OS files
-.DS_Store
+# VS Code settings
+.vscode/
+
+# Data - Stop tracking Excel and CSVs
+# We use 'data/' to ignore the whole folder
+data/
+*.xlsx
+*.csv
+*.xls
 
 # Microsoft Office temporary files
 ~$*
-
-# Common Excel temp patterns
 *.tmp
+
+# OS files
+.DS_Store
