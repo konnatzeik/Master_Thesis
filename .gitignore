@@ -1,0 +1,16 @@
+# Python/Jupyter
+__pycache__/
+.ipynb_checkpoints/
+
+# Data (If your Excel files are huge, ignore them and keep backups elsewhere)
+# *.xlsx
+# *.csv
+
+# OS files
+.DS_Store
+
+# Microsoft Office temporary files
+~$*
+
+# Common Excel temp patterns
+*.tmp
