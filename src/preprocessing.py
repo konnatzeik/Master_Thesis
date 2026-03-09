@@ -1,3 +1,5 @@
+from re import sub
+
 import pandas as pd
 
 #--------------------------------------------
@@ -17,7 +19,7 @@ def load_data(file_path:str) -> pd.DataFrame:
     df_static = pd.read_excel(file_path, sheet_name='Patient_Static')
 
     #execute a right join to keep all visit records
-    df = pd.merge(df_static, df_visits, on='patient_id', how='right')
+    df = pd.merge(df_static, df_visits, on='patient_id', how='right', validate="one_to_many")
 
     return df
 
@@ -27,23 +29,47 @@ def load_data(file_path:str) -> pd.DataFrame:
 #                Data Cleaning
 #--------------------------------------------
 
-def check_for_duplicates(df:pd.DataFrame) -> pd.DataFrame:
+def drop_sparse_columns(df:pd.DataFrame, threshold:float=0.65) -> pd.DataFrame:
     """
-    Checking if there any duplicates and removes them
+    Drop the columns that have more than the threshold missing values,
+    except for the protected columns that are crucial for the analysis and should be kept regardless of missingness.
     """
-    duplicates = df.duplicated().sum()
-    if duplicates > 0:
-        print(f"Found {duplicates} duplicate rows. Removing them...")
-        df = df.drop_duplicates()
+    missing_percent = df.isnull().mean()
+    protected_cols = ['das28_score', 'crp', 'esr', 'tjc_28', 'sjc_28']
+    cols_exceeding_threshold = missing_percent[missing_percent > threshold].index
+
+    cols_to_drop = [col for col in cols_exceeding_threshold if col not in protected_cols]
+
+    if len(cols_to_drop) > 0:
+        print(f"Dropping columns with > {threshold*100}% missing values: {','.join(cols_to_drop)}")
+        df = df.drop(columns=cols_to_drop)
     
     return df
+
+
+def encode_static_features(df:pd.DataFrame) -> pd.DataFrame:
+    """
+    Transform static text features into numeric binary values.
+    """
+    #define columns and their mappings
+    binary_mapping = {
+        'gender': {'Female': 1, 'Male': 0},
+        'rf_status': {'Positive': 1, 'Negative': 0},
+        'anti_ccp_status': {'Positive': 1, 'Negative': 0}
+    }
+
+    for col, mapping in binary_mapping.items():
+        if col in df.columns:
+            df[col] = df[col].str.strip().map(mapping).astype('Int64')
+    return df
+
 
 
 def convert_dates(df: pd.DataFrame) -> pd.DataFrame:
     """
     Change date columns into datetime format
-    
     """
+    
     #convert data columns
     df['visit_date'] = pd.to_datetime(df['visit_date'], dayfirst=True)
     df['date_of_birth'] = pd.to_datetime(df['date_of_birth'], dayfirst=True)
@@ -63,6 +89,7 @@ def handle_categorical_missing(df:pd.DataFrame) -> pd.DataFrame:
 
     if 'b_ts_dmard_name' in df.columns:
         df['b_ts_dmard_name'] = df['b_ts_dmard_name'].fillna('None')
+
 
     return df
 
@@ -93,13 +120,7 @@ def time_intervals(df:pd.DataFrame) ->pd.DataFrame:
     #calculate disease duration (in years)
     df['disease_duration'] = (df['visit_date'].dt.year - df['year_of_diagnosis']).astype('Int64')
 
-    return df
-
-
-def age_calculation(df:pd.DataFrame) -> pd.DataFrame:
-    """
-    Calculate age at each visit
-    """
+    #calculate age at each visit    
     df['age_at_visit'] = (df['visit_date'].dt.year - df['birth_year'])
 
     return df
@@ -134,6 +155,12 @@ def validation_data(df:pd.DataFrame) -> None:
     run sanity checks
     """
 
+    #Checking if there any duplicates and removes them
+    duplicates = df.duplicated(subset=['patient_id', 'visit_date']).sum()
+    if duplicates > 0:
+        print(f"{duplicates} duplicate rows were founded. Removing them...")
+        df = df.drop_duplicates(subset=['patient_id', 'visit_date']) 
+
     #check  if disease duration is negative due to type error
     invalid_duration = df[df['disease_duration']<0]
     if not invalid_duration.empty:
@@ -155,18 +182,16 @@ def validation_data(df:pd.DataFrame) -> None:
 def preprocess_data(file_path:str) ->pd.DataFrame:
 
     df = load_data(file_path)
-    df = check_for_duplicates(df)
     df = convert_dates(df)
     df = add_birth_year(df)
     df = time_intervals(df)
-    df = age_calculation(df)
     df = handle_categorical_missing(df)
     df = das28_change(df)
     df = flare_next_visit(df)
-
+    df = encode_static_features(df)
+    df = drop_sparse_columns(df)
 
     validation_data(df)
-
 
     return df 
 
@@ -175,12 +200,12 @@ def preprocess_data(file_path:str) ->pd.DataFrame:
 #                Execution
 #--------------------------------------------
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    file_path = r"data/RA_Dataset.xlsx"
-    output_path = r"data/RA_dataset_cleaned.csv"
+#     file_path = r"data/RA_Dataset.xlsx"
+#     output_path = r"data/RA_dataset_cleaned.csv"
 
-    df_cleaned = preprocess_data(file_path)
+#     df_cleaned = preprocess_data(file_path)
 
-    # Save final processed dataset to CSV
-    df_cleaned.to_csv(output_path, index=False)
+#     # Save final processed dataset to CSV
+#     df_cleaned.to_csv(output_path, index=False)
