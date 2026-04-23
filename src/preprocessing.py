@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import re
 
 #--------------------------------------------
@@ -92,6 +93,14 @@ def clean_treatment_decision(df:pd.DataFrame) -> pd.DataFrame:
 
     #fill missing values with 'no_decision' to indicate that in the baseline visits, there are no treatment decisions
     df['treatment_decision'] = df['treatment_decision'].fillna('no_decision')
+
+    #group treatment decisions into broader categories to reduce the number of categories
+    df['treatment_decision_grouped'] = df['treatment_decision'].replace({
+        "escalation": "escalation_or_switch",
+        "switch": "escalation_or_switch",
+        "tapering": "tapering_or_stop",
+        "stop": "tapering_or_stop"
+    })
 
     return df
 
@@ -281,9 +290,11 @@ def lab_features(df:pd.DataFrame) -> pd.DataFrame:
     Features created:
     -crp_missing: binary feature inidcating if the CRP value is missing
     -esr_missing: binary feature inidcating if the ESR value is missing
-    crp_normalized: CRP value is normalized by the lab-specific upper limit of normal 
+    -crp_normalized: CRP value is normalized by the lab-specific upper limit of normal 
+    -log_crp_normalized: log-transformed CRP value
     -inflammation_flag: binary feature indicating if there is evidence of inflammation based on CRP and ESR values
      (CRP above the upper limit of normal or ESR above 20 mm/hr)
+    -inflammation_score: a score from 0 to 2 indicating the degree of inflammation (0 = neither high, 1 = one high, 2 = both high)
     """
     
     df['crp_missing'] = df['crp'].isna().astype(int)
@@ -291,11 +302,16 @@ def lab_features(df:pd.DataFrame) -> pd.DataFrame:
 
     #normalize CRP value to the given upper limit of normal
     df['crp_normalized'] = df['crp']/df['crp_upper_limit']
+    #log-transform the normalized CRP value to reduce skewness
+    df['log_crp_normalized'] = np.log(df['crp_normalized'])
 
     #Binary inflammation indicator
-    crp_high = (df['crp_normalized'] > 1).fillna(False)
-    esr_high = (df['esr'] > 20).fillna(False)
-    df['inflammation_flag'] = (crp_high | esr_high).astype(int)
+    df['crp_high'] = (df['crp_normalized'] > 1).fillna(False)
+    df['esr_high'] = (df['esr'] > 20).fillna(False)
+    df['inflammation_flag'] = (df['crp_high'] | df['esr_high']).astype(int)
+
+    # 0 = neither high, 1 = one high, 2 = both high
+    df['inflammation_score'] = df['crp_high'].astype(int) + df['esr_high'].astype(int)
 
     return df
 
@@ -311,31 +327,35 @@ def comorbidities_groups(df:pd.DataFrame) -> pd.DataFrame:
         'comorb_cardiovascular': [
             'transient ischemic attack', 'hypertension', 'coronary artery disease', 
             'heart failure', 'atrial fibrillation', 'chronic venous insufficiency',
-            'carotid stenosis', 'heart attack', 'ventricular septal defect',
-            'paroxysmal supraventricular tachycardia', 'ascending aortic aneurysm', 'pericarditis'
+            'carotid stenosis', 'ventricular septal defect',
+            'paroxysmal supraventricular tachycardia', 'ascending aortic aneurysm', 'pericarditis',
+            'venous thrombosis', 'peripheral vascular disease', 'aortic valve stenosis',
+            'pulmonary arterial hypertension', 'mitral valve disease', 'myocardial infarction'
         ],
         'comorb_metabolic_endocrine': [
             'hypothyroidism', 'hashimoto', 'dyslipidemia',
-            'diabetes mellitus', 'cushing syndrome'
+            'diabetes mellitus', 'cushing syndrome', 'morbid obesity'
         ],
         'comorb_respiratory' : [
             'chronic obstructive pulmonary disease', 'asthma',
-            'pulmonary fibrosis', 'tuberculosis'
+            'pulmonary fibrosis', 'tuberculosis', 'emphysema'
         ],
         'comorb_renal_urological' : [
             'nephrolithiasis', 'prostatitis', 'benign prostatic hyperplasia',
             'solitary kidney', 'chronic kidney disease'
         ],                               
         'comorb_gastrointestinal_hepatic' : [
-            'hepatitis b', 'resolved hepatitis b', 
-            'gastroesophageal reflux disease', 'total gastrectomy'
+            'hepatitis b', 'resolved hepatitis b', 'hepatic steatosis',
+            'gastroesophageal reflux disease', 'total gastrectomy', 'cholecystectomy',
+            'operated perianal abscess', 'barretts esophagus', 'irritable bowel syndrome'
         ],                                     
         'comorb_malignancy' : [
             'kidney cancer', 'breast cancer', 'parotid cancer', 'operated meningioma'
         ],                        
         'comorb_musculoskeletal' : [
             'osteoporosis', 'osteopenia', 'osteoarthritis',
-            'gout', 'lumbar spondylosis', 'bilateral carpal tunnel syndrome'
+            'gout', 'lumbar spondylosis', 'bilateral carpal tunnel syndrome',
+            'degenerative cervical spine disease'
         ],                             
         'comorb_neurologic_psychiatric' : [
             'depression', 'anxiety disorder', 'parkinsonism',
@@ -343,7 +363,8 @@ def comorbidities_groups(df:pd.DataFrame) -> pd.DataFrame:
         ],                                    
         'comorb_autoimmune_other' : [
             'sjogren syndrome', 'thalassemia', 'beta thalassemia minor',
-            'monoclonal gammopathy of undetermined significance', 'mesenteric lipodystrophy'
+            'monoclonal gammopathy of undetermined significance', 'mesenteric lipodystrophy',
+            'blepharitis', 'keratitis', 'herpes zoster', 'glaucoma', 'hives'
         ]                                     
                                 
     }
