@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import re
 
+
 #--------------------------------------------
 #                Data Loading
 #--------------------------------------------
@@ -12,11 +13,11 @@ def load_data(file_path:str) -> pd.DataFrame:
     file_path: the path to the Excel file 
 
     Returns a pd.DataFrame, containing static and longitudinal data.
-
     """
 
-    df_visits = pd.read_excel(file_path, sheet_name='Visits_Longitudinal')
     df_static = pd.read_excel(file_path, sheet_name='Patient_Static')
+    df_visits = pd.read_excel(file_path, sheet_name='Visits_Longitudinal')
+    
 
     #execute a right join to keep all visit records
     df = pd.merge(df_static, df_visits, on='patient_id', how='right', validate="one_to_many")
@@ -31,17 +32,12 @@ def load_data(file_path:str) -> pd.DataFrame:
 
 def convert_dates(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Convert columns with time information to the preffered format .
-
-    visit_date and date_of_birth -> datetime format
-    year_of_diagnosis -> integer format
-    
-    This function ensures that the date columns have the correct format, 
-    in order to be used in feature engineering.
+    Convert time columns to appropriate formats:
+    - visit_date, date_of_birth -> datetime
+    - year_of_diagnosis -> integer
     """
 
     #convert dates to datetime format
-   
     df['visit_date'] = pd.to_datetime(df['visit_date'], dayfirst=True, errors='coerce')
     df['date_of_birth'] = pd.to_datetime(df['date_of_birth'], dayfirst=True, errors='coerce')
 
@@ -53,7 +49,9 @@ def convert_dates(df: pd.DataFrame) -> pd.DataFrame:
 
 def remove_duplicates(df:pd.DataFrame) -> pd.DataFrame:
     """
+
     Check for duplicate rows based on patient_id and visit_date, and remove them if found.
+    
     """
 
     #Checking if there any duplicates and removes them
@@ -65,16 +63,16 @@ def remove_duplicates(df:pd.DataFrame) -> pd.DataFrame:
     return df
 
 def handle_categorical_missing(df:pd.DataFrame) -> pd.DataFrame:
-
     """
-    Replace missing values in categorical features with 'none' and 
-    'no_switch', to distinguish between true missingness and the absence of a category.
+    Replace missing values in categorical features with 'none' and 'no_switch',
+    to distinguish between true missingness and the absence of a category.
     """
 
     fill_values = {'switch_reason': 'no_switch',
-                     'csdmard_name': 'none',
-                     'b_ts_dmard_name': 'none',
-                     'comorbidities': 'none'
+                    'csdmard_name': 'none',
+                    'b_ts_dmard_name': 'none',
+                    'comorbidities': 'none',
+                    'treatment_decision': 'no_decision'
                     }
 
     for col, value in fill_values.items():
@@ -85,21 +83,20 @@ def handle_categorical_missing(df:pd.DataFrame) -> pd.DataFrame:
 
 def clean_treatment_decision(df:pd.DataFrame) -> pd.DataFrame:
     """
-    Clean the categorical feature 'treatment_decision'
+    Clean the categorical feature treatment_decision
+    Group treatment decisions into broader categories to reduce the number of categories and simplify the analysis.
     """
 
     df['treatment_decision'] = df['treatment_decision'].astype(str).str.strip().str.lower()
-    df['treatment_decision'] = df['treatment_decision'].replace('nan', pd.NA)
-
-    #fill missing values with 'no_decision' to indicate that in the baseline visits, there are no treatment decisions
-    df['treatment_decision'] = df['treatment_decision'].fillna('no_decision')
-
+   
     #group treatment decisions into broader categories to reduce the number of categories
     df['treatment_decision_grouped'] = df['treatment_decision'].replace({
         "escalation": "escalation_or_switch",
         "switch": "escalation_or_switch",
         "tapering": "tapering_or_stop",
-        "stop": "tapering_or_stop"
+        "stop": "tapering_or_stop",
+        "stable": "stable_no_change",
+        "no_decision": "baseline_no_decision"
     })
 
     return df
@@ -138,11 +135,24 @@ def encode_features(df:pd.DataFrame) -> pd.DataFrame:
 
 def clean_comorbidities(df:pd.DataFrame) -> pd.DataFrame:
     """
-     Clean and standardize comorbidities column, 
-     a free-text column that contains a list of comorbidities for each patient.
+    Standardize the free-text comorbidities column by normalizing case,
+    correcting known spelling variants, removing placeholder values,
+    and converting separators to commas.
     """
+
     #normalize text format
     df['comorbidities'] = df['comorbidities'].str.lower().str.strip()
+
+    #fix known spelling variants before splitting or grouping comorbidities
+    normalization_map = {
+        r'\bdyslipidemiaa\b': 'dyslipidemia',
+        r'\bdyslipidaemia\b': 'dyslipidemia',
+        r'\bhypertention\b': 'hypertension',
+        r'\bdiabetis mellitus\b': 'diabetes mellitus',
+        r'\bosteoarthrtis\b': 'osteoarthritis'
+    }
+    for pattern, replacement in normalization_map.items():
+        df['comorbidities'] = df['comorbidities'].str.replace(pattern, replacement, regex=True)
 
     #replace 'none' with an empty string to show the absence of comorbidities, 
     # in order to avoid confusion with missing values
@@ -187,13 +197,9 @@ def drop_sparse_columns(df:pd.DataFrame, threshold:float=0.5) -> pd.DataFrame:
 
 
 
-
-
-
 #--------------------------------------------
 #                Feature Engineering
 #--------------------------------------------
-
 
 
 def add_birth_year(df:pd.DataFrame) -> pd.DataFrame:
@@ -207,9 +213,7 @@ def add_birth_year(df:pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-
 def time_intervals(df:pd.DataFrame) ->pd.DataFrame:
-
     """
     Create time-based longitudinal features for each visit.
 
@@ -217,15 +221,13 @@ def time_intervals(df:pd.DataFrame) ->pd.DataFrame:
     - days_since_last_visit: number of days since the previous visit
     - disease_duration: years since diagnosis at each visit
     - age_at_visit: patient's age in years at each visit
-
-    Visits are first sorted chronologically within each patient.
     """
     
     # ensure chronological order
     df = df.sort_values(['patient_id', 'visit_date'])
 
     #calculate how many days have passed since the last visit
-    #(the very first visit that has not a previous one is filled with 0)
+    #the very first visit that has not a previous one is filled with 0
     df['days_since_last_visit'] = (df.groupby('patient_id')['visit_date'].diff().dt.days.fillna(0)).astype('Int64')
 
     #calculate disease duration (in years)
@@ -236,6 +238,28 @@ def time_intervals(df:pd.DataFrame) ->pd.DataFrame:
     
     return df
 
+def discretize_medications(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Discretize continuous medication dose features into categorical bins.
+    This can help capture non-linear relationships between medication doses and flare risk.
+    """
+
+    #discretize steroid dose into categories (0 mg, 1-10 mg, 11-20 mg, 21-25 mg)
+    df['steroid_dose_category'] = pd.cut(
+        df['steroid_dose'],
+         bins=[-0.1, 0, 10, float(np.inf)],
+         labels=['0 mg', '1-10 mg', '>10mg']
+    )
+
+    #discretize methotrexate dose into categories (0 mg, 1-10 mg, 11-20 mg, 21-25 mg)
+    df['mtx_dose_category'] = pd.cut(
+        df['mtx_dose'],
+         bins=[-0.1, 0, 10, 20, 25],
+         labels=['0 mg', '1-10 mg', '11-20 mg', '21-25 mg']
+    )
+
+    return df
+
 
 def das28_change(df:pd.DataFrame) -> pd.DataFrame:
     """
@@ -244,7 +268,6 @@ def das28_change(df:pd.DataFrame) -> pd.DataFrame:
     Negative value: decrease in disease activity
     """
 
-    df = df.sort_values(['patient_id', 'visit_date'])
     #Difference in DAS28 score compared to previous visit (fill the first visit with 0)
     df['das28_change'] = df.groupby('patient_id')['das28_score'].diff()
 
@@ -259,8 +282,6 @@ def previous_flare(df:pd.DataFrame) -> pd.DataFrame:
     Create a feature indicating if a flare occurred at the previous visit.
     """
 
-    df = df.sort_values(['patient_id', 'visit_date'])
-
     #previous flare status (fill the first visit with 0)
     df['previous_flare'] = df.groupby('patient_id')['flare_event'].shift(1).fillna(0).astype(int)
 
@@ -272,55 +293,36 @@ def flare_next_visit(df:pd.DataFrame) -> pd.DataFrame:
     at the next visit for each patient.
     """
 
-    df = df.sort_values(['patient_id', 'visit_date'])
-
     #define target variable
-    df['target_flare_next'] = df.groupby('patient_id')['flare_event'].shift(-1)
-
-    #drop rows where target variable is missing (the last visit of each patient)
-    df = df.dropna(subset=['target_flare_next'])
-    df['target_flare_next'] = df['target_flare_next'].astype(int)
-
+    df['flare_next_visit'] = df.groupby('patient_id')['flare_event'].shift(-1)
+   
     return df
 
-
 def lab_features(df:pd.DataFrame) -> pd.DataFrame:
-
     """
     Features created:
-    -crp_missing: binary feature inidcating if the CRP value is missing
-    -esr_missing: binary feature inidcating if the ESR value is missing
-    -crp_normalized: CRP value is normalized by the lab-specific upper limit of normal 
-    -log_crp_normalized: log-transformed CRP value
-    -inflammation_flag: binary feature indicating if there is evidence of inflammation based on CRP and ESR values
-     (CRP above the upper limit of normal or ESR above 20 mm/hr)
-    -inflammation_score: a score from 0 to 2 indicating the degree of inflammation (0 = neither high, 1 = one high, 2 = both high)
+    - crp_missing: binary feature inidcating if the CRP value is missing
+    - esr_missing: binary feature inidcating if the ESR value is missing
+    - crp_normalized: CRP value is normalized by the lab-specific upper limit of normal 
+    - inflammation_flag: binary feature indicating if there is evidence of inflammation based on CRP and ESR values (CRP above the upper limit of normal or ESR above 20 mm/hr)
     """
     
+    #binary features indicating missing values
     df['crp_missing'] = df['crp'].isna().astype(int)
     df['esr_missing'] = df['esr'].isna().astype(int)
 
     #normalize CRP value to the given upper limit of normal
     df['crp_normalized'] = df['crp']/df['crp_upper_limit']
-    #log-transform the normalized CRP value to reduce skewness
-    df['log_crp_normalized'] = np.log(df['crp_normalized'])
 
-    #Binary inflammation indicator
-    df['crp_high'] = (df['crp_normalized'] > 1).fillna(False)
-    df['esr_high'] = (df['esr'] > 20).fillna(False)
-    df['inflammation_flag'] = (df['crp_high'] | df['esr_high']).astype(int)
-
-    # 0 = neither high, 1 = one high, 2 = both high
-    df['inflammation_score'] = df['crp_high'].astype(int) + df['esr_high'].astype(int)
+    #combined inflammation indicator (elevated CRP or ESR)
+    df['inflammation_flag'] = (df['crp_normalized'] > 1).astype(int) | (df['esr'] > 20).astype(int)
 
     return df
-
 
 def comorbidities_groups(df:pd.DataFrame) -> pd.DataFrame:
     """
     Group individual comorbidities into separate clinical categories, and create binary features for each group
-
-    Create a comorbidity count representing the total number of  comorbidities for each patient.
+    Create a comorbidity count representing the total number of comorbidities for each patient.
     """
 
     comorbidity_mapping = {
@@ -373,8 +375,8 @@ def comorbidities_groups(df:pd.DataFrame) -> pd.DataFrame:
         pattern = '|'.join(map(re.escape, diseases))
         df[group] = df['comorbidities'].str.contains(pattern, na=False).astype(int)
 
+    #create a comorbidity count representing the total number of comorbidities for each patient
     df['comorbidity_count'] = df['comorbidities'].apply(lambda x: 0 if x == '' else len(x.split(',')))
-
 
     return df
 
@@ -390,7 +392,7 @@ def treatment_features(df:pd.DataFrame) -> pd.DataFrame:
     df['b_ts_dmard_use'] = df['b_ts_dmard_name'].apply(lambda x: 0 if x == 'none' else 1)
     df['steroid_use'] = (df['steroid_dose']>0).astype(int)
 
-    #treatment count
+    #treatment count feature representing the total number of treatments for each visit
     df['treatment_count'] = df[['csdmard_use', 'b_ts_dmard_use', 'steroid_use','mtx_use']].sum(axis=1)
 
     return df
@@ -447,9 +449,10 @@ def preprocess_data(file_path:str) ->pd.DataFrame:
 
     #feature engineering
     df = add_birth_year(df)
-    df = time_intervals(df)   
+    df = time_intervals(df)
     df = das28_change(df)
     
+    df = discretize_medications(df)
     df = previous_flare(df)
     df = flare_next_visit(df)
     
@@ -460,5 +463,5 @@ def preprocess_data(file_path:str) ->pd.DataFrame:
     #data validation
     df = validation_data(df)
 
-    return df 
+    return df
 
