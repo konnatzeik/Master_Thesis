@@ -49,9 +49,7 @@ def convert_dates(df: pd.DataFrame) -> pd.DataFrame:
 
 def remove_duplicates(df:pd.DataFrame) -> pd.DataFrame:
     """
-
     Check for duplicate rows based on patient_id and visit_date, and remove them if found.
-    
     """
 
     #Checking if there any duplicates and removes them
@@ -224,7 +222,7 @@ def time_intervals(df:pd.DataFrame) ->pd.DataFrame:
     """
     
     # ensure chronological order
-    df = df.sort_values(['patient_id', 'visit_date'])
+    df = df.sort_values(['patient_id', 'visit_date']).reset_index(drop=True)
 
     #calculate how many days have passed since the last visit
     #the very first visit that has not a previous one is filled with 0
@@ -244,7 +242,7 @@ def discretize_medications(df: pd.DataFrame) -> pd.DataFrame:
     This can help capture non-linear relationships between medication doses and flare risk.
     """
 
-    #discretize steroid dose into categories (0 mg, 1-10 mg, 11-20 mg, 21-25 mg)
+    #discretize steroid dose into categories (0 mg, 1-10 mg, >10 mg)
     df['steroid_dose_category'] = pd.cut(
         df['steroid_dose'],
          bins=[-0.1, 0, 10, float(np.inf)],
@@ -261,11 +259,12 @@ def discretize_medications(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def das28_change(df:pd.DataFrame) -> pd.DataFrame:
+def das28_features(df:pd.DataFrame) -> pd.DataFrame:
     """
     Calculate change in DAS28 score compared to previous visit.
     Positive value: increase in disease activity
     Negative value: decrease in disease activity
+
     """
 
     #Difference in DAS28 score compared to previous visit (fill the first visit with 0)
@@ -315,11 +314,18 @@ def lab_features(df:pd.DataFrame) -> pd.DataFrame:
     df['crp_normalized'] = df['crp']/df['crp_upper_limit']
 
     #combined inflammation indicator (elevated CRP or ESR)
-    df['inflammation_flag'] = (df['crp_normalized'] > 1).astype(int) | (df['esr'] > 20).astype(int)
+    cond_crp = df['crp_normalized'] > 1
+    cond_esr = df['esr'] > 20
+
+    df['inflammation_flag'] = np.where(
+    df['crp_normalized'].isna() & df['esr'].isna(),
+    np.nan,
+    np.where(cond_crp | cond_esr, 1, 0) 
+)
 
     return df
 
-def comorbidities_groups(df:pd.DataFrame) -> pd.DataFrame:
+def comorbidities_features(df:pd.DataFrame) -> pd.DataFrame:
     """
     Group individual comorbidities into separate clinical categories, and create binary features for each group
     Create a comorbidity count representing the total number of comorbidities for each patient.
@@ -450,18 +456,17 @@ def preprocess_data(file_path:str) ->pd.DataFrame:
     #feature engineering
     df = add_birth_year(df)
     df = time_intervals(df)
-    df = das28_change(df)
+    df = das28_features(df)
     
     df = discretize_medications(df)
     df = previous_flare(df)
     df = flare_next_visit(df)
     
     df = lab_features(df)
-    df = comorbidities_groups(df)
+    df = comorbidities_features(df)
     df = treatment_features(df)
 
     #data validation
     df = validation_data(df)
 
     return df
-
