@@ -27,4 +27,4 @@ data/
 .DS_Store
 
 
-scripts/
+scripts/notebooks/EDA_raw.ipynb
