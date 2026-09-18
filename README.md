@@ -37,9 +37,6 @@ The dataset consists of longitudinal clinical records from 106 pseudonymized RA 
 ```bash
 RA-flare-prediction/
 │
-├── data/
-│ └── README.md # Dataset description
-│
 ├── notebooks/
 │ ├── 01_EDA.ipynb # Exploratory data analysis
 │ ├── 02_Feature_Selection.ipynb # Multi-criteria feature selection
